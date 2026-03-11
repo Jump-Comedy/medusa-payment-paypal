@@ -81,11 +81,7 @@ class PayPalProviderService extends AbstractPaymentProcessor {
         : "AUTHORIZE"
 
       let soft_descriptor: string | undefined
-      let items: Array<{
-        name: string
-        quantity: string
-        unit_amount: { currency_code: string; value: string | number }
-      }> = []
+      let description: string | undefined
 
       if (this.cartService_) {
         try {
@@ -98,19 +94,8 @@ class PayPalProviderService extends AbstractPaymentProcessor {
             .join(", ")
           if (productTitle) {
             soft_descriptor = productTitle.substring(0, 5)
+            description = productTitle.substring(0, 127)
           }
-
-          items = cart.items.map((i) => ({
-            name: (i.variant?.product?.title || i.title || "Item").substring(0, 127),
-            quantity: String(i.quantity),
-            unit_amount: {
-              currency_code: currency_code.toUpperCase(),
-              value: roundToTwo(
-                humanizeAmount(i.unit_price, currency_code),
-                currency_code
-              ),
-            },
-          }))
         } catch (e) {
           this.logger_?.warn?.(
             `Failed to retrieve cart for soft_descriptor: ${e.message}`
@@ -118,43 +103,22 @@ class PayPalProviderService extends AbstractPaymentProcessor {
         }
       }
 
-      const upperCurrency = currency_code.toUpperCase()
-      const totalValue = roundToTwo(
-        humanizeAmount(amount, currency_code),
-        currency_code
-      )
-
-      const purchaseUnit: any = {
-        custom_id: resource_id,
-        ...(soft_descriptor ? { soft_descriptor } : {}),
-      }
-
-      if (items.length > 0) {
-        const itemTotal = items.reduce(
-          (sum, item) => sum + Number(item.unit_amount.value) * Number(item.quantity),
-          0
-        )
-        purchaseUnit.amount = {
-          currency_code: upperCurrency,
-          value: totalValue,
-          breakdown: {
-            item_total: {
-              currency_code: upperCurrency,
-              value: roundToTwo(itemTotal, currency_code),
-            },
-          },
-        }
-        purchaseUnit.items = items
-      } else {
-        purchaseUnit.amount = {
-          currency_code: upperCurrency,
-          value: totalValue,
-        }
-      }
-
       session_data = await this.paypal_.createOrder({
         intent,
-        purchase_units: [purchaseUnit],
+        purchase_units: [
+          {
+            custom_id: resource_id,
+            amount: {
+              currency_code: currency_code.toUpperCase(),
+              value: roundToTwo(
+                humanizeAmount(amount, currency_code),
+                currency_code
+              ),
+            },
+            ...(soft_descriptor ? { soft_descriptor } : {}),
+            ...(description ? { description } : {}),
+          },
+        ],
       })
     } catch (e) {
       return this.buildError("An error occurred in initiatePayment", e)
