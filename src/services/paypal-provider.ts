@@ -93,7 +93,7 @@ class PayPalProviderService extends AbstractPaymentProcessor {
             .filter(Boolean)
             .join(", ")
           if (productTitle) {
-            soft_descriptor = productTitle.substring(0, 5)
+            soft_descriptor = productTitle.substring(0, 10)
             description = productTitle.substring(0, 127)
           }
         } catch (e) {
