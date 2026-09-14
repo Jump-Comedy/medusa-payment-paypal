@@ -1,6 +1,6 @@
 {
   "name": "@jumpcomedy/medusa-payment-paypal",
-  "version": "6.0.9",
+  "version": "6.1.0",
   "description": "Paypal Payment provider for Medusa Commerce (with soft_descriptor support)",
   "main": "dist/index.js",
   "repository": {

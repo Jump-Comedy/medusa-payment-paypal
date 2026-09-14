@@ -162,6 +162,122 @@ describe("PaypalProvider", () => {
     })
   })
 
+  describe("descriptors", function () {
+    const cartWith = (items) => ({
+      retrieve: jest.fn().mockResolvedValue({ items }),
+    })
+    const item = (title, venueName?) => ({
+      variant: {
+        product: {
+          title,
+          venueArrangement: venueName ? { venue: { name: venueName } } : null,
+        },
+      },
+    })
+
+    class VenuePaypalProvider extends PaypalProvider {
+      protected getDescriptorCartRelations() {
+        return [
+          ...super.getDescriptorCartRelations(),
+          "items.variant.product.venueArrangement.venue",
+        ]
+      }
+
+      protected getSoftDescriptorLabel(i) {
+        return (
+          i.variant?.product?.venueArrangement?.venue?.name ??
+          super.getSoftDescriptorLabel(i)
+        )
+      }
+    }
+
+    const purchaseUnit = () =>
+      (PayPalMock.createOrder as jest.Mock).mock.calls[0][0].purchase_units[0]
+
+    beforeEach(() => {
+      jest.clearAllMocks()
+    })
+
+    it("uses product titles truncated to 10 and 127 characters", async () => {
+      const title = "Friday Night Standup ".repeat(10)
+      const cartService = cartWith([item(title)])
+      const provider = new PaypalProvider(
+        { ...container, cartService },
+        paypalConfig
+      )
+
+      await provider.initiatePayment(
+        initiatePaymentContextSuccess as PaymentProcessorContext
+      )
+
+      expect(cartService.retrieve).toHaveBeenCalledWith(
+        initiatePaymentContextSuccess.resource_id,
+        { relations: ["items", "items.variant", "items.variant.product"] }
+      )
+      expect(purchaseUnit().soft_descriptor).toBe("Friday Nig")
+      expect(purchaseUnit().description).toBe(title.substring(0, 127))
+    })
+
+    it("lets a subclass change the soft_descriptor label and relations", async () => {
+      const cartService = cartWith([
+        item("Friday Night Standup", "Comedy Bar Danforth"),
+      ])
+      const provider = new VenuePaypalProvider(
+        { ...container, cartService },
+        paypalConfig
+      )
+
+      await provider.initiatePayment(
+        initiatePaymentContextSuccess as PaymentProcessorContext
+      )
+
+      expect(cartService.retrieve).toHaveBeenCalledWith(
+        initiatePaymentContextSuccess.resource_id,
+        {
+          relations: [
+            "items",
+            "items.variant",
+            "items.variant.product",
+            "items.variant.product.venueArrangement.venue",
+          ],
+        }
+      )
+      expect(purchaseUnit().soft_descriptor).toBe("Comedy Bar")
+      expect(purchaseUnit().description).toBe("Friday Night Standup")
+    })
+
+    it("falls back to the base label when the subclass has nothing", async () => {
+      const cartService = cartWith([item("Friday Night Standup")])
+      const provider = new VenuePaypalProvider(
+        { ...container, cartService },
+        paypalConfig
+      )
+
+      await provider.initiatePayment(
+        initiatePaymentContextSuccess as PaymentProcessorContext
+      )
+
+      expect(purchaseUnit().soft_descriptor).toBe("Friday Nig")
+    })
+
+    it("omits descriptors when the cart cannot be retrieved", async () => {
+      const cartService = {
+        retrieve: jest.fn().mockRejectedValue(new Error("boom")),
+      }
+      const provider = new PaypalProvider(
+        { ...container, logger: { warn: jest.fn() } as any, cartService },
+        paypalConfig
+      )
+
+      await provider.initiatePayment(
+        initiatePaymentContextSuccess as PaymentProcessorContext
+      )
+
+      expect(purchaseUnit()).not.toHaveProperty("soft_descriptor")
+      expect(purchaseUnit()).not.toHaveProperty("description")
+    })
+  })
+
   describe("authorizePayment", function () {
     let paypalProvider: PaypalProvider
 

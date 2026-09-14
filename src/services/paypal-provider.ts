@@ -68,6 +68,58 @@ class PayPalProviderService extends AbstractPaymentProcessor {
     }
   }
 
+  /**
+   * Relations loaded on the cart before the soft_descriptor and description
+   * are built. Subclasses that read extra data in getSoftDescriptorLabel
+   * should extend this list.
+   */
+  protected getDescriptorCartRelations(): string[] {
+    return ["items", "items.variant", "items.variant.product"]
+  }
+
+  /**
+   * Text a single cart item contributes to the soft_descriptor. Labels of all
+   * items are joined and truncated by buildDescriptors, so overrides do not
+   * need to worry about length.
+   */
+  protected getSoftDescriptorLabel(item: any): string | undefined {
+    return item.variant?.product?.title
+  }
+
+  protected async buildDescriptors(
+    resource_id: string
+  ): Promise<{ soft_descriptor?: string; description?: string }> {
+    if (!this.cartService_) {
+      return {}
+    }
+
+    try {
+      const cart = await this.cartService_.retrieve(resource_id, {
+        relations: this.getDescriptorCartRelations(),
+      })
+      const softDescriptorLabel = cart.items
+        .map((i) => this.getSoftDescriptorLabel(i))
+        .filter(Boolean)
+        .join(", ")
+      const productTitle = cart.items
+        .map((i) => i.variant?.product?.title)
+        .filter(Boolean)
+        .join(", ")
+
+      return {
+        ...(softDescriptorLabel
+          ? { soft_descriptor: softDescriptorLabel.substring(0, 10) }
+          : {}),
+        ...(productTitle ? { description: productTitle.substring(0, 127) } : {}),
+      }
+    } catch (e) {
+      this.logger_?.warn?.(
+        `Failed to retrieve cart for soft_descriptor: ${e.message}`
+      )
+      return {}
+    }
+  }
+
   async initiatePayment(
     context: PaymentProcessorContext
   ): Promise<PaymentProcessorError | PaymentProcessorSessionResponse> {
@@ -80,28 +132,9 @@ class PayPalProviderService extends AbstractPaymentProcessor {
         ? "CAPTURE"
         : "AUTHORIZE"
 
-      let soft_descriptor: string | undefined
-      let description: string | undefined
-
-      if (this.cartService_) {
-        try {
-          const cart = await this.cartService_.retrieve(resource_id, {
-            relations: ["items", "items.variant", "items.variant.product"],
-          })
-          const productTitle = cart.items
-            .map((i) => i.variant?.product?.title)
-            .filter(Boolean)
-            .join(", ")
-          if (productTitle) {
-            soft_descriptor = productTitle.substring(0, 10)
-            description = productTitle.substring(0, 127)
-          }
-        } catch (e) {
-          this.logger_?.warn?.(
-            `Failed to retrieve cart for soft_descriptor: ${e.message}`
-          )
-        }
-      }
+      const { soft_descriptor, description } = await this.buildDescriptors(
+        resource_id
+      )
 
       session_data = await this.paypal_.createOrder({
         intent,
